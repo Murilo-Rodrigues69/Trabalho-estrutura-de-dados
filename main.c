@@ -3,65 +3,65 @@
 #include "csv.h"
 
 int main(void) {
-    Processo *processos = NULL;
+    const char *ARQ = "TJDFT_filtrado.csv";   
+    const char *OUT = "processos_julgados_meta1.csv";
 
-    // Ajuste o nome/caminho se necessário (por padrão: dados.csv)
-    size_t qtd = LerArquivo("TJDFT_amostra.csv", &processos);
-    if (!qtd) {
-        printf("Nenhum processo lido.\n");
-        return 0;
+    // 1) Contar total de processos (linhas, sem carregar tudo)
+    size_t total = ContarProcessos(ARQ);
+    printf("Total de processos: %zu\n", total);
+
+    // 2) Último órgão julgado por ID (streaming)
+    int id_busca = 323961078;
+    int ultimo_oj = 0;
+    if (UltimoOrgaoJulgadoStreaming(ARQ, id_busca, &ultimo_oj)) {
+        printf("ID %d -> id_ultimo_oj = %d\n", id_busca, ultimo_oj);
+    } else {
+        printf("ID %d não encontrado.\n", id_busca);
     }
 
-    printf("✅ Foram lidos %zu processos.\n\n", qtd);
+    // 3) Data de recebimento mais antiga (streaming)
+    int id_antigo = 0;
+    char dt_antiga[11] = {0};
+    if (DtRecebimentoMaisAntigoStreaming(ARQ, &id_antigo, dt_antiga)) {
+        printf("Mais antigo: id=%d, dt_recebimento=%s\n", id_antigo, dt_antiga);
+    } else {
+        printf("Nenhuma data de recebimento válida encontrada.\n");
+    }
 
-    // imprime os 5 primeiros para conferir
-   // size_t lim = (qtd < 5) ? qtd : 5;
-   // for (size_t i = 0; i < lim; i++) {
-   //     printf("Processo %zu\n", i+1);
-   //     printf("  ID: %d\n", processos[i].id_processo);
-    //    printf("  Procedimento: %s\n", processos[i].procedimento);
-    //    printf("  Ramo: %s\n", processos[i].ramo_justica);
-    //    printf("  Recebido: %s\n", processos[i].dt_recebimento);
-    //    printf("  Resolvido: %s\n", processos[i].dt_resolvido);
-    //    printf("  Violência Doméstica: %d\n", processos[i].flag_violencia_domestica);
-    //    printf("-------------------------------------\n");
-   // }
+    // 4) Resumo de flags (streaming)
+     printf("Violencia Domestica: %zu\n", ContarFlagViolenciaDomesticaStreaming(ARQ));
+    printf("Feminicidio:         %zu\n", ContarFlagFeminicidioStreaming(ARQ));
+    printf("Ambiental:           %zu\n", ContarFlagAmbientalStreaming(ARQ));
+    printf("Quilombolas:         %zu\n", ContarFlagQuilombolasStreaming(ARQ));
+    printf("Indigenas:           %zu\n", ContarFlagIndigenasStreaming(ARQ));
+    printf("Infancia:            %zu\n", ContarFlagInfanciaStreaming(ARQ));
 
-    size_t quantidadeProcessos = ContarProcessos("TJDFT_amostra.csv");
-    printf("Numero de processos: %i",quantidadeProcessos);
 
-    free(processos);
+    int id = 325359695;
+    size_t dias = DiferencaDiasPorIdStreaming(ARQ, id);
 
-    printf("\n\n");
-    UltimoOrgaoJulgado(323961078,processos);
-    printf("\n\n");
-    dtRecebimentoMaisAntigo(processos, qtd);
-    printf("\n\n");
-    size_t qtdVD = ContarProcessosViolenciaDomestica(processos, qtd);
-    printf("Existem %zu processos de violencia domestica.\n", qtdVD);
-    printf("\n\n");
-    size_t qtdFe = ContarProcessosFeminicidio(processos,qtd);
-    printf("Existem %zu processos de feminicidio.\n",qtdFe);
-    printf("\n\n");
-    size_t qtdAm = ContarProcessosAmbientais(processos,qtd);
-    printf("Existem %zu processos Ambientais.\n",qtdAm);
-    printf("\n\n");
-    size_t qtdQu = ContarProcessosQuilombas(processos,qtd);
-    printf("Existem %zu processos Quilombolas.\n",qtdQu);
-    printf("\n\n");
-    size_t qtdIn = ContarProcessosIndigenas(processos,qtd);
-    printf("Existem %zu processos Indigenas.\n",qtdIn);
-    printf("\n\n");
-    size_t qtdIi = ContarProcessosInfancia(processos,qtd);
-    printf("Existem %zu processos envolvendo infancia e juventude.\n",qtdIi);
+    if (dias > 0) {
+        printf("O processo %d levou %zu dias entre recebimento e resolvido.\n", id, dias);
+    } else {
+        printf("ID %d não encontrado ou datas inválidas.\n", id);
+    }
 
-    printf("\n\n");
+    double meta1_tribunal = CalcularMeta1AgregadaStreaming(ARQ);
 
-    int id = 323961063;
-    size_t dias = DiferencaEntreDtRecibimentoDtResolvido(processos, id, qtd);
-    printf("ID %d: diferenca = %zu dias\n", id, dias);
+    if (meta1_tribunal > 0.0)
+        printf("Cumprimento da Meta 1 (agregado) = %.2f%%\n", meta1_tribunal);
+    else
+        printf("Não foi possível calcular a Meta 1 agregada (dados inválidos).\n");
+
+
+
+        size_t n = 0;
+    if (ExportarProcessosJulgadosMeta1CSV(ARQ, OUT, &n)) {
+        printf("Gerado '%s' com %zu processos julgados (mérito) na Meta 1.\n", OUT, n);
+    } else {
+        printf("Falha ao gerar o CSV filtrado.\n");
+    }
+
 
     return 0;
 }
-
-

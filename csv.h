@@ -2,6 +2,7 @@
 #define CSV_H
 
 #include <stdio.h>
+#include <stddef.h>
 
 #define MAX_STR 128
 #define FIELDS  27  // número de colunas do CSV
@@ -36,26 +37,25 @@ typedef struct {
     int  susm1;
 } Processo;
 
-/** Lê o CSV em `path`, aloca vetor dinâmico em `*out` e retorna a quantidade.
- *  Use `free(*out)` ao final. Retorna 0 se não leu nada ou em erro. */
-size_t LerArquivo(const char *path, Processo **out);
-
+/* Utilidades em STREAMING (não guarda tudo em memória) */
 size_t ContarProcessos(const char *path);
 
-void UltimoOrgaoJulgado(int id,Processo *processos);
+/* Retorna 1 e escreve em *out_oj se encontrar; 0 se não achar o id */
+int UltimoOrgaoJulgadoStreaming(const char *path, int id, int *out_oj);
 
-void dtRecebimentoMaisAntigo(Processo *processos, int qtd);
+/* Retorna 1 e preenche out_id/out_date (YYYY-MM-DD) se encontrar alguma data válida; 0 caso contrário */
+int DtRecebimentoMaisAntigoStreaming(const char *path, int *out_id, char out_date[11]);
 
-size_t ContarProcessosViolenciaDomestica(Processo *processos, int qtd);
+size_t ContarFlagViolenciaDomesticaStreaming(const char *path);
+size_t ContarFlagFeminicidioStreaming(const char *path);
+size_t ContarFlagAmbientalStreaming(const char *path);
+size_t ContarFlagQuilombolasStreaming(const char *path);
+size_t ContarFlagIndigenasStreaming(const char *path);
+size_t ContarFlagInfanciaStreaming(const char *path);
 
-size_t ContarProcessosFeminicidio(Processo *processos, int qtd);
+size_t DiferencaDiasPorIdStreaming(const char *path, int id);
 
-size_t ContarProcessosAmbientais(Processo *processos, int qtd);
+double CalcularMeta1AgregadaStreaming(const char *path);
 
-size_t ContarProcessosQuilombas(Processo *processos, int qtd);
-
-size_t ContarProcessosIndigenas(Processo *processos, int qtd);
-
-size_t ContarProcessosInfancia(Processo *processos, int qtd);
-
+int ExportarProcessosJulgadosMeta1CSV(const char *in_path, const char *out_path, size_t *out_count);
 #endif

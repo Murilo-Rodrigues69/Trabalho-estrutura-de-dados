@@ -1,15 +1,27 @@
 #include "csv.h"
-#include <stdlib.h>
 #include <string.h>
-#include <time.h>
+#include <stdlib.h>
+
+static int parse_ymd(const char *s, int *y, int *m, int *d) {
+    if (!s || strlen(s) != 10) return 0;
+    return sscanf(s, "%d-%d-%d", y, m, d) == 3;
+};
+
+static long days_from_ymd(int y, int m, int d) {
+    y -= (m <= 2);
+    const int era = (y >= 0 ? y : y - 399) / 400;
+    const unsigned yoe = (unsigned)(y - era * 400);
+    const unsigned doy = (153u * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
+    const unsigned doe = yoe * 365 + yoe/4 - yoe/100 + doy;
+    return era * 146097 + (int)doe - 719468; // 1970-01-01 como base
+};
 
 static void rstrip(char *s){
     size_t n = strlen(s);
     while (n && (s[n-1] == '\n' || s[n-1] == '\r')) s[--n] = '\0';
-}
+};
 
-/* Split que preserva campos vazios entre ;; e preenche fields[0..FIELDS-1].
-   Retorna o número de campos encontrados (>= FIELDS esperado). */
+/* Split que preserva vazios entre ;; e preenche fields[0..FIELDS-1]. */
 static int split_semicolon(const char *line, char fields[][MAX_STR]) {
     int col = 0;
     size_t i = 0, j = 0;
@@ -19,8 +31,7 @@ static int split_semicolon(const char *line, char fields[][MAX_STR]) {
     while (line[i] != '\0' && col < FIELDS) {
         if (line[i] == ';') {
             fields[col][j] = '\0';
-            col++; j = 0;
-            i++;
+            col++; j = 0; i++;
             continue;
         }
         if (j + 1 < MAX_STR) fields[col][j++] = line[i];
@@ -28,198 +39,263 @@ static int split_semicolon(const char *line, char fields[][MAX_STR]) {
     }
     if (col < FIELDS) { fields[col][j] = '\0'; col++; }
     return col;
-}
-
-size_t LerArquivo(const char *path, Processo **out) {
-    *out = NULL;
-
-    FILE *arquivo = fopen(path, "r");
-    if (!arquivo) {
-        perror("Erro ao abrir o arquivo");
-        return 0;
-    }
-
-    char linha[4096];
-
-    // lê e descarta o cabeçalho
-    if (!fgets(linha, sizeof(linha), arquivo)) {
-        fclose(arquivo);
-        return 0;
-    }
-
-    Processo *vet = NULL;
-    size_t qtd = 0, cap = 0;
-
-    char f[FIELDS][MAX_STR];
-
-    while (fgets(linha, sizeof(linha), arquivo) != NULL) {
-        rstrip(linha);
-        if (!linha[0]) continue;
-
-        int cols = split_semicolon(linha, f);
-        if (cols < FIELDS) continue; // linha incompleta
-
-        if (qtd == cap) {
-            cap = cap ? cap * 2 : 16;
-            Processo *tmp = (Processo*)realloc(vet, cap * sizeof(Processo));
-            if (!tmp) {
-                perror("realloc");
-                free(vet);
-                fclose(arquivo);
-                return 0;
-            }
-            vet = tmp;
-        }
-
-        Processo p = (Processo){0}; // zera tudo
-
-        // números
-        p.id_processo              = atoi(f[0]);
-        p.id_tribunal              = atoi(f[6]);
-        p.recurso                  = atoi(f[7]);
-        p.id_ultimo_oj             = atoi(f[8]);
-        p.id_ultima_classe         = atoi(f[10]);
-        p.flag_violencia_domestica = atoi(f[11]);
-        p.flag_feminicidio         = atoi(f[12]);
-        p.flag_ambiental           = atoi(f[13]);
-        p.flag_quilombolas         = atoi(f[14]);
-        p.flag_indigenas           = atoi(f[15]);
-        p.flag_infancia            = atoi(f[16]);
-        p.cnm1                     = atoi(f[19]);
-        p.primeirasentm1           = atoi(f[20]);
-        p.baixm1                   = atoi(f[21]);
-        p.mpum1                    = atoi(f[23]);
-        p.desm1                    = atoi(f[25]);
-        p.susm1                    = atoi(f[26]);
-
-        // strings
-        if (*f[1])  strncpy(p.numero_sigilo,  f[1],  MAX_STR-1);
-        if (*f[2])  strncpy(p.sigla_grau,     f[2],  MAX_STR-1);
-        if (*f[3])  strncpy(p.procedimento,   f[3],  MAX_STR-1);
-        if (*f[4])  strncpy(p.ramo_justica,   f[4],  MAX_STR-1);
-        if (*f[5])  strncpy(p.sigla_tribunal, f[5],  MAX_STR-1);
-        if (*f[9])  strncpy(p.dt_recebimento, f[9],  sizeof p.dt_recebimento - 1);
-        if (*f[17]) strncpy(p.decisao,        f[17], MAX_STR-1);
-        if (*f[18]) strncpy(p.dt_resolvido,   f[18], sizeof p.dt_resolvido - 1);
-        if (*f[22]) strncpy(p.decm1,          f[22], MAX_STR-1);
-        if (*f[24]) strncpy(p.julgadom1,      f[24], MAX_STR-1);
-
-        vet[qtd++] = p;
-    }
-
-    fclose(arquivo);
-    *out = vet;
-    return qtd;
-}
+};
 
 size_t ContarProcessos(const char *path){
     FILE *f = fopen(path, "r");
-    if (!f) {
-        perror("Erro ao abrir CSV");
-        return 0;
-    }
+    if (!f) { perror("Erro ao abrir CSV"); return 0; }
 
     char linha[4096];
     size_t qtd = 0;
 
     // descarta cabeçalho
-    if (!fgets(linha, sizeof(linha), f)) {
-        fclose(f);
-        return 0;
-    }
+    if (!fgets(linha, sizeof(linha), f)) { fclose(f); return 0; }
 
-    // conta quantas linhas tem até o final
     while (fgets(linha, sizeof(linha), f)) {
-        if (linha[0] != '\n' && linha[0] != '\r') {
-            qtd++;
-        }
+        if (linha[0] != '\n' && linha[0] != '\r') qtd++;
     }
 
     fclose(f);
     return qtd;
 };
 
-void UltimoOrgaoJulgado(int id,Processo *processos){
-    for(int i = 0; i<10;i++){
-        if(processos[i].id_processo == id ){
-            printf("O ultimo orgao que julgou o processo de id : %i foi : %i",id,processos[i].id_ultimo_oj);
+int UltimoOrgaoJulgadoStreaming(const char *path, int id, int *out_oj) {
+    if (out_oj) *out_oj = 0;
+
+    FILE *f = fopen(path, "r");
+    if (!f) { perror("Erro ao abrir CSV"); return 0; }
+
+    char linha[4096];
+    char flds[FIELDS][MAX_STR];
+
+    // cabeçalho
+    if (!fgets(linha, sizeof(linha), f)) { fclose(f); return 0; }
+
+    while (fgets(linha, sizeof(linha), f)) {
+        rstrip(linha);
+        if (!linha[0]) continue;
+
+        if (split_semicolon(linha, flds) < FIELDS) continue;
+
+        int id_proc = atoi(flds[0]);
+        if (id_proc == id) {
+            int oj = atoi(flds[8]); // id_ultimo_oj é a coluna 8
+            if (out_oj) *out_oj = oj;
+            fclose(f);
+            return 1;
         }
     }
+
+    fclose(f);
+    return 0; // não encontrou
 };
 
-void dtRecebimentoMaisAntigo(Processo *processos, int qtd) {
-    if (qtd <= 0) return;
+int DtRecebimentoMaisAntigoStreaming(const char *path, int *out_id, char out_date[11]) {
+    if (out_id) *out_id = 0;
+    if (out_date) out_date[0] = '\0';
 
-    int indiceMaisAntigo = 0;
+    FILE *f = fopen(path, "r");
+    if (!f) { perror("Erro ao abrir CSV"); return 0; }
 
-    for (int i = 1; i < qtd; i++) {
-        if (strcmp(processos[i].dt_recebimento, processos[indiceMaisAntigo].dt_recebimento) < 0) {
-            indiceMaisAntigo = i;
+    char linha[4096];
+    char flds[FIELDS][MAX_STR];
+    int inicializado = 0;
+    char menor[11] = {0};
+    int  menor_id = 0;
+
+    // cabeçalho
+    if (!fgets(linha, sizeof(linha), f)) { fclose(f); return 0; }
+
+    while (fgets(linha, sizeof(linha), f)) {
+        rstrip(linha);
+        if (!linha[0]) continue;
+
+        if (split_semicolon(linha, flds) < FIELDS) continue;
+
+        // dt_recebimento é col 9
+        if (flds[9][0] == '\0') continue; // sem data
+
+        if (!inicializado || strcmp(flds[9], menor) < 0) {
+            strncpy(menor, flds[9], sizeof(menor)-1);
+            menor[sizeof(menor)-1] = '\0';
+            menor_id = atoi(flds[0]);
+            inicializado = 1;
         }
     }
 
-    printf("O processo de id: %d tem a data de recebimento mais antiga: %s\n",
-           processos[indiceMaisAntigo].id_processo,
-           processos[indiceMaisAntigo].dt_recebimento);
+    fclose(f);
+
+    if (!inicializado) return 0;
+    if (out_id) *out_id = menor_id;
+    if (out_date) {
+        strncpy(out_date, menor, 11);
+        out_date[10] = '\0';
+    }
+    return 1;
 };
 
-size_t ContarProcessosViolenciaDomestica(Processo *processos, int qtd){
+static size_t contar_flag_col_streaming(const char *path, int col_flag) {
+    FILE *f = fopen(path, "r");
+    if (!f) { perror("Erro ao abrir CSV"); return 0; }
 
-    size_t quantidade = 0;
-    for(int i = 0;i <qtd;i++){
-        if(processos[i].flag_violencia_domestica == 1){
-            quantidade++;
-        }
+    char linha[4096];
+    char flds[FIELDS][MAX_STR];
+    size_t count = 0;
+
+    // cabeçalho
+    if (!fgets(linha, sizeof(linha), f)) { fclose(f); return 0; }
+
+    while (fgets(linha, sizeof(linha), f)) {
+        rstrip(linha);
+        if (!linha[0]) continue;
+        if (split_semicolon(linha, flds) < FIELDS) continue;
+
+        if (atoi(flds[col_flag]) == 1) count++;
     }
-    return quantidade;
+
+    fclose(f);
+    return count;
 };
 
-size_t ContarProcessosFeminicidio(Processo *processos, int qtd){
-     size_t quantidade = 0;
-    for(int i = 0;i <qtd;i++){
-        if(processos[i].flag_feminicidio == 1){
-            quantidade++;
-        }
-    }
-    return quantidade;
+// ---- wrappers públicos: uma função por flag ----
+size_t ContarFlagViolenciaDomesticaStreaming(const char *path) {
+    return contar_flag_col_streaming(path, 11);
 };
 
-size_t ContarProcessosAmbientais(Processo *processos, int qtd){
-     size_t quantidade = 0;
-    for(int i = 0;i <qtd;i++){
-        if(processos[i].flag_ambiental == 1){
-            quantidade++;
-        }
-    }
-    return quantidade;
+size_t ContarFlagFeminicidioStreaming(const char *path) {
+    return contar_flag_col_streaming(path, 12);
 };
 
-size_t ContarProcessosQuilombas(Processo *processos, int qtd){
-     size_t quantidade = 0;
-    for(int i = 0;i <qtd;i++){
-        if(processos[i].flag_quilombolas == 1){
-            quantidade++;
-        }
-    }
-    return quantidade;
+size_t ContarFlagAmbientalStreaming(const char *path) {
+    return contar_flag_col_streaming(path, 13);
 };
 
-size_t ContarProcessosIndigenas(Processo *processos, int qtd){
-    size_t quantidade = 0;
-    for(int i = 0;i <qtd;i++){
-        if(processos[i].flag_indigenas == 1){
-            quantidade++;
-        }
-    }
-    return quantidade;
+size_t ContarFlagQuilombolasStreaming(const char *path) {
+    return contar_flag_col_streaming(path, 14);
 };
 
-size_t ContarProcessosInfancia(Processo *processos, int qtd){
-    size_t quantidade = 0;
-    for(int i = 0;i <qtd;i++){
-        if(processos[i].flag_infancia == 1){
-            quantidade++;
+size_t ContarFlagIndigenasStreaming(const char *path) {
+    return contar_flag_col_streaming(path, 15);
+};
+
+size_t ContarFlagInfanciaStreaming(const char *path) {
+    return contar_flag_col_streaming(path, 16);
+};
+
+size_t DiferencaDiasPorIdStreaming(const char *path, int id) {
+    FILE *f = fopen(path, "r");
+    if (!f) { perror("Erro ao abrir CSV"); return 0; }
+
+    char linha[4096];
+    char flds[FIELDS][MAX_STR];
+
+    // descarta cabeçalho
+    if (!fgets(linha, sizeof(linha), f)) { fclose(f); return 0; }
+
+    while (fgets(linha, sizeof(linha), f)) {
+        rstrip(linha);
+        if (!linha[0]) continue;
+        if (split_semicolon(linha, flds) < FIELDS) continue;
+
+        int id_proc = atoi(flds[0]);
+        if (id_proc == id) {
+            const char *d1 = flds[9];   // dt_recebimento
+            const char *d2 = flds[18];  // dt_resolvido
+            int y1,m1,day1,y2,m2,day2;
+
+            if (!parse_ymd(d1,&y1,&m1,&day1)) { fclose(f); return 0; }
+            if (!parse_ymd(d2,&y2,&m2,&day2)) { fclose(f); return 0; }
+
+            long a = days_from_ymd(y1,m1,day1);
+            long b = days_from_ymd(y2,m2,day2);
+            long diff = (a>b)?(a-b):(b-a);
+
+            fclose(f);
+            return (size_t)diff;
         }
     }
-    return quantidade;
+
+    fclose(f);
+    return 0; // não encontrado
+};
+
+double CalcularMeta1AgregadaStreaming(const char *path) {
+    FILE *f = fopen(path, "r");
+    if (!f) { perror("Erro ao abrir CSV"); return 0.0; }
+
+    char linha[4096];
+    char flds[FIELDS][MAX_STR];
+
+    long long soma_cnm1 = 0;
+    long long soma_desm1 = 0;
+    long long soma_susm1 = 0;
+    long long soma_julgadom1 = 0;
+
+    // descarta cabeçalho
+    if (!fgets(linha, sizeof(linha), f)) { fclose(f); return 0.0; }
+
+    while (fgets(linha, sizeof(linha), f)) {
+        rstrip(linha);
+        if (!linha[0]) continue;
+        if (split_semicolon(linha, flds) < FIELDS) continue;
+
+        soma_cnm1      += atoi(flds[19]); // cnm1
+        soma_julgadom1 += atoi(flds[24]); // julgadom1
+        soma_desm1     += atoi(flds[25]); // desm1
+        soma_susm1     += atoi(flds[26]); // susm1
+    }
+
+    fclose(f);
+
+    long long denominador = soma_cnm1 + soma_desm1 - soma_susm1;
+    if (denominador <= 0) return 0.0;
+
+    return ((double)soma_julgadom1 / denominador) * 100.0;
+};
+
+int ExportarProcessosJulgadosMeta1CSV(const char *in_path, const char *out_path, size_t *out_count) {
+    if (out_count) *out_count = 0;
+
+    FILE *fin = fopen(in_path, "r");
+    if (!fin) { perror("Erro ao abrir CSV de entrada"); return 0; }
+
+    FILE *fout = fopen(out_path, "w");
+    if (!fout) { perror("Erro ao criar CSV de saída"); fclose(fin); return 0; }
+
+    char linha[4096];
+    char flds[FIELDS][MAX_STR];
+
+    /* 1) Copia o cabeçalho como está */
+    if (!fgets(linha, sizeof(linha), fin)) {
+        /* arquivo vazio */
+        fclose(fin);
+        fclose(fout);
+        return 1; /* nada a exportar, mas tecnicamente sucesso */
+    }
+    fputs(linha, fout);  /* escreve o cabeçalho original */
+
+    /* 2) Filtra linhas por julgadom1 > 0 (coluna 24, 0-based) */
+    size_t escritos = 0;
+    while (fgets(linha, sizeof(linha), fin)) {
+        /* guarda linha original sem o \n? vamos normalizar adicionando \n ao final */
+        rstrip(linha);
+        if (!linha[0]) continue;
+
+        if (split_semicolon(linha, flds) < FIELDS) continue;
+
+        int julgadom1 = atoi(flds[24]);
+        if (julgadom1 > 0) {
+            /* reconstroi a linha para garantir final de linha consistente */
+            for (int i = 0; i < FIELDS; i++) {
+                fputs(flds[i], fout);
+                fputc(i == FIELDS - 1 ? '\n' : ';', fout);
+            }
+            escritos++;
+        }
+    }
+
+    if (out_count) *out_count = escritos;
+    fclose(fin);
+    fclose(fout);
+    return 1;
 };
